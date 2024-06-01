@@ -2,12 +2,13 @@ from typing import Union, List
 
 from dotenv import load_dotenv
 from langchain.agents.output_parsers import ReActSingleInputOutputParser
+from langchain.agents.format_scratchpad import format_log_to_str
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import AgentAction, AgentFinish
 from langchain.tools import Tool, tool
 from langchain.tools.render import render_text_description
-
+from callback import AgentCallbackHandler
 
 load_dotenv()
 
@@ -59,7 +60,7 @@ if __name__ == "__main__":
     Begin!
     
     Question: {input}
-    Thought:
+    Thought: {agent_scratchpad}
     """
 
     prompt = PromptTemplate.from_template(template=template).partial(
@@ -73,7 +74,11 @@ if __name__ == "__main__":
     # The stop parameter is used to define sequences where the model should stop generating further text. Here, it is set to stop on either "\nObservation" or "Observation".
     # This means that when the model generates text, it will halt as soon as it encounters either of these sequences. This is useful for controlling the format of the generated responses, especially in structured outputs like agent interactions.
     llm = ChatOpenAI(
-        temperature=0, model_kwargs={"stop": ["\nObservation", "Observation"]}
+        temperature=0,
+        model_kwargs={
+            "stop": ["\nObservation", "Observation"],
+            "callback": [AgentCallbackHandler],
+        },
     )
 
     intermediate_steps = []
@@ -86,28 +91,38 @@ if __name__ == "__main__":
     agent = (
         {
             "input": lambda x: x["input"],
+            "agent_scratchpad": lambda x: format_log_to_str(x["agent_scratchpad"]),
         }
         | prompt
         | llm
         | ReActSingleInputOutputParser()
     )
 
-    # This invokes the agent with an example input question ("What is the length of 'DOG' in characters?").
-    # The agent's response (agent_step) is printed.
-    # The response will either be an AgentAction (indicating an action to take) or an AgentFinish (indicating a final answer)
-    agent_step: Union[AgentAction, AgentFinish] = agent.invoke(
-        {
-            "input": "What is the length of 'DOG' in characters?",
-        }
-    )
-    print(agent_step)
+    agent_step = ""
+    while not isinstance(agent_step, AgentFinish):
+        # This invokes the agent with an example input question ("What is the length of 'DOG' in characters?").
+        # The agent's response (agent_step) is printed.
+        # The response will either be an AgentAction (indicating an action to take) or an AgentFinish (indicating a final answer)
+        agent_step: Union[AgentAction, AgentFinish] = agent.invoke(
+            {
+                "input": "What is the length of the word: DOG",
+                "agent_scratchpad": intermediate_steps,
+            }
+        )
+        print(agent_step)
 
-    # If the agent's response is an AgentAction, it extracts the tool name and input from the response.
-    # It finds the corresponding tool using find_tool_by_name, invokes the tool with the input, and prints the observation (result of the tool's action).
-    if isinstance(agent_step, AgentAction):
-        tool_name = agent_step.tool
-        tool_to_use = find_tool_by_name(tools, tool_name)
-        tool_input = agent_step.tool_input
+        # If the agent's response is an AgentAction, it extracts the tool name and input from the response.
+        # It finds the corresponding tool using find_tool_by_name, invokes the tool with the input, and prints the observation (result of the tool's action).
+        if isinstance(agent_step, AgentAction):
+            tool_name = agent_step.tool
+            tool_to_use = find_tool_by_name(tools, tool_name)
+            tool_input = agent_step.tool_input
 
-        observation = tool_to_use.func(str(tool_input))
-        print(f"{observation=}")
+            observation = tool_to_use.func(str(tool_input))
+            print(f"{observation=}")
+            # append a tuple of the agent step and the observation to the intermediate steps list
+            intermediate_steps.append((agent_step, str(observation)))
+
+    if isinstance(agent_step, AgentFinish):
+        print("### AgentFinish ###")
+        print(agent_step.return_values)
