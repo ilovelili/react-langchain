@@ -77,8 +77,8 @@ if __name__ == "__main__":
         temperature=0,
         model_kwargs={
             "stop": ["\nObservation", "Observation"],
-            "callback": [AgentCallbackHandler],
         },
+        callbacks=[AgentCallbackHandler()],
     )
 
     intermediate_steps = []
@@ -88,6 +88,7 @@ if __name__ == "__main__":
     # The prompt template
     # The language model
     # An output parser (ReActSingleInputOutputParser)
+    # agent_scratchpad: https://chatgpt.com/share/5dc68bd3-e04b-4fbc-80d8-83bf0aa1eae3
     agent = (
         {
             "input": lambda x: x["input"],
